@@ -14,6 +14,7 @@ type Station struct {
 	Cipher         string            `json:"cipher"`
 	Authentication string            `json:"authentication"`
 	WPS            map[string]string `json:"wps"`
+	Handshake      *Handshake        `json:"-"`
 }
 
 func cleanESSID(essid string) string {
@@ -35,6 +36,7 @@ func NewStation(essid, bssid string, frequency int, rssi int8) *Station {
 		Frequency: frequency,
 		RSSI:      rssi,
 		WPS:       make(map[string]string),
+		Handshake: NewHandshake(),
 	}
 }
 
@@ -52,4 +54,8 @@ func (s *Station) Channel() int {
 
 func (s *Station) HasWPS() bool {
 	return len(s.WPS) > 0
+}
+
+func (s *Station) IsOpen() bool {
+	return s.Encryption == "" || s.Encryption == "OPEN"
 }

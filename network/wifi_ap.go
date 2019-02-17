@@ -10,7 +10,8 @@ type AccessPoint struct {
 	*Station
 	sync.Mutex
 
-	clients map[string]*Station
+	clients         map[string]*Station
+	withKeyMaterial bool
 }
 
 type apJSON struct {
@@ -59,7 +60,7 @@ func (ap *AccessPoint) RemoveClient(mac string) {
 	}
 }
 
-func (ap *AccessPoint) AddClient(bssid string, frequency int, rssi int8) *Station {
+func (ap *AccessPoint) AddClientIfNew(bssid string, frequency int, rssi int8) (*Station, bool) {
 	ap.Lock()
 	defer ap.Unlock()
 
@@ -71,13 +72,13 @@ func (ap *AccessPoint) AddClient(bssid string, frequency int, rssi int8) *Statio
 		s.RSSI = rssi
 		s.LastSeen = time.Now()
 
-		return s
+		return s, false
 	}
 
 	s := NewStation("", bssid, frequency, rssi)
 	ap.clients[bssid] = s
 
-	return s
+	return s, true
 }
 
 func (ap *AccessPoint) NumClients() int {
@@ -95,4 +96,59 @@ func (ap *AccessPoint) Clients() (list []*Station) {
 		list = append(list, c)
 	}
 	return
+}
+
+func (ap *AccessPoint) EachClient(cb func(mac string, station *Station)) {
+	ap.Lock()
+	defer ap.Unlock()
+
+	for m, station := range ap.clients {
+		cb(m, station)
+	}
+}
+
+func (ap *AccessPoint) WithKeyMaterial(state bool) {
+	ap.Lock()
+	defer ap.Unlock()
+
+	ap.withKeyMaterial = state
+}
+
+func (ap *AccessPoint) HasKeyMaterial() bool {
+	ap.Lock()
+	defer ap.Unlock()
+
+	return ap.withKeyMaterial
+}
+
+func (ap *AccessPoint) NumHandshakes() int {
+	ap.Lock()
+	defer ap.Unlock()
+
+	sum := 0
+
+	for _, c := range ap.clients {
+		if c.Handshake.Complete() {
+			sum++
+		}
+	}
+
+	return sum
+}
+
+func (ap *AccessPoint) HasHandshakes() bool {
+	return ap.NumHandshakes() > 0
+}
+
+func (ap *AccessPoint) HasPMKID() bool {
+	ap.Lock()
+	defer ap.Unlock()
+
+	for _, c := range ap.clients {
+		if c.Handshake.HasPMKID() {
+			return true
+		}
+	}
+
+	return false
 }

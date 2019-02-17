@@ -3716,6 +3716,7 @@ var manuf = map[string]string{
 	"20.71414654697472":  "Beijing Zongheng Electro-Mechanical Technology Development Co.",
 	"12.346858881024":    "Keith & Koep GmbH",
 	"24.12597398":        "Hon Hai Precision Ind. Co.,Ltd.",
+	"24.14858725":        "Technicolor",
 	"24.9180285":         "IEEE Registration Authority",
 	"20.52819395608576":  "Velsitec-Clibase",
 	"12.123917675773952": "Practical Software Studio LLC",

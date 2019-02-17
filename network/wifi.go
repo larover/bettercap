@@ -2,9 +2,16 @@ package network
 
 import (
 	"encoding/json"
+	"os"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcapgo"
+
+	"github.com/evilsocket/islazy/fs"
 )
 
 func Dot11Freq2Chan(freq int) int {
@@ -122,19 +129,21 @@ func isBogusMacESSID(essid string) bool {
 	return false
 }
 
-func (w *WiFi) AddIfNew(ssid, mac string, frequency int, rssi int8) *AccessPoint {
+func (w *WiFi) AddIfNew(ssid, mac string, frequency int, rssi int8) (*AccessPoint, bool) {
 	w.Lock()
 	defer w.Unlock()
 
 	mac = NormalizeMac(mac)
 	if ap, found := w.aps[mac]; found {
 		ap.LastSeen = time.Now()
-		ap.RSSI = rssi
+		if rssi != 0 {
+			ap.RSSI = rssi
+		}
 		// always get the cleanest one
 		if !isBogusMacESSID(ssid) {
 			ap.Hostname = ssid
 		}
-		return ap
+		return ap, false
 	}
 
 	newAp := NewAccessPoint(ssid, mac, frequency, rssi)
@@ -144,7 +153,7 @@ func (w *WiFi) AddIfNew(ssid, mac string, frequency int, rssi int8) *AccessPoint
 		w.newCb(newAp)
 	}
 
-	return nil
+	return newAp, true
 }
 
 func (w *WiFi) Get(mac string) (*AccessPoint, bool) {
@@ -172,5 +181,60 @@ func (w *WiFi) GetClient(mac string) (*Station, bool) {
 
 func (w *WiFi) Clear() error {
 	w.aps = make(map[string]*AccessPoint)
+	return nil
+}
+
+func (w *WiFi) NumHandshakes() int {
+	w.Lock()
+	defer w.Unlock()
+
+	sum := 0
+	for _, ap := range w.aps {
+		for _, station := range ap.Clients() {
+			if station.Handshake.Complete() {
+				sum++
+			}
+		}
+	}
+
+	return sum
+}
+
+func (w *WiFi) SaveHandshakesTo(fileName string, linkType layers.LinkType) error {
+	w.Lock()
+	defer w.Unlock()
+
+	doHead := !fs.Exists(fileName)
+
+	fp, err := os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0666)
+	if err != nil {
+		return err
+	}
+	defer fp.Close()
+
+	writer := pcapgo.NewWriter(fp)
+
+	if doHead {
+		if err = writer.WriteFileHeader(65536, linkType); err != nil {
+			return err
+		}
+	}
+
+	for _, ap := range w.aps {
+		for _, station := range ap.Clients() {
+			if station.Handshake.Complete() || station.Handshake.HasPMKID() {
+				err = nil
+				station.Handshake.EachUnsavedPacket(func(pkt gopacket.Packet) {
+					if err == nil {
+						err = writer.WritePacket(pkt.Metadata().CaptureInfo, pkt.Data())
+					}
+				})
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
+
 	return nil
 }

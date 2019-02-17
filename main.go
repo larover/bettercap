@@ -35,33 +35,19 @@ func main() {
 
 	fmt.Printf("%s (type '%s' for a list of commands)\n\n", tui.Bold(appName), tui.Bold("help"))
 
-	sess.Register(modules.NewEventsStream(sess))
-	sess.Register(modules.NewTicker(sess))
-	sess.Register(modules.NewUpdateModule(sess))
-	sess.Register(modules.NewCapletsModule(sess))
-	sess.Register(modules.NewMacChanger(sess))
-	sess.Register(modules.NewProber(sess))
-	sess.Register(modules.NewDiscovery(sess))
-	sess.Register(modules.NewArpSpoofer(sess))
-	sess.Register(modules.NewDHCP6Spoofer(sess))
-	sess.Register(modules.NewDNSSpoofer(sess))
-	sess.Register(modules.NewSniffer(sess))
-	sess.Register(modules.NewPacketProxy(sess))
-	sess.Register(modules.NewAnyProxy(sess))
-	sess.Register(modules.NewTcpProxy(sess))
-	sess.Register(modules.NewHttpProxy(sess))
-	sess.Register(modules.NewHttpsProxy(sess))
-	sess.Register(modules.NewHttpServer(sess))
-	sess.Register(modules.NewRestAPI(sess))
-	sess.Register(modules.NewWOL(sess))
-	sess.Register(modules.NewWiFiModule(sess))
-	sess.Register(modules.NewBLERecon(sess))
-	sess.Register(modules.NewSynScanner(sess))
-	sess.Register(modules.NewGPS(sess))
-	sess.Register(modules.NewMySQLServer(sess))
+	// Load all modules
+	modules.LoadModules(sess)
 
 	if err = sess.Start(); err != nil {
 		log.Fatal("%s", err)
+	}
+
+	// Some modules are enabled by default in order
+	// to make the interactive session useful.
+	for _, modName := range str.Comma(*sess.Options.AutoStart) {
+		if err = sess.Run(modName + " on"); err != nil {
+			log.Fatal("error while starting module %s: %s", modName, err)
+		}
 	}
 
 	// Commands sent with -eval are used to set specific
@@ -70,22 +56,14 @@ func main() {
 	// modules might already be started.
 	for _, cmd := range session.ParseCommands(*sess.Options.Commands) {
 		if err = sess.Run(cmd); err != nil {
-			log.Error("Error while running '%s': %s", tui.Bold(cmd), tui.Red(err.Error()))
-		}
-	}
-
-	// Some modules are enabled by default in order
-	// to make the interactive session useful.
-	for _, modName := range str.Comma(*sess.Options.AutoStart) {
-		if err = sess.Run(modName + " on"); err != nil {
-			log.Fatal("Error while starting module %s: %s", modName, err)
+			log.Error("error while running '%s': %s", tui.Bold(cmd), tui.Red(err.Error()))
 		}
 	}
 
 	// Then run the caplet if specified.
 	if *sess.Options.Caplet != "" {
 		if err = sess.RunCaplet(*sess.Options.Caplet); err != nil {
-			log.Error("Error while running caplet %s: %s", tui.Bold(*sess.Options.Caplet), tui.Red(err.Error()))
+			log.Error("error while running caplet %s: %s", tui.Bold(*sess.Options.Caplet), tui.Red(err.Error()))
 		}
 	}
 
