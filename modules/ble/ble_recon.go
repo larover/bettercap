@@ -57,13 +57,20 @@ func NewBLERecon(s *session.Session) *BLERecon {
 			return mod.Stop()
 		}))
 
+	mod.AddHandler(session.NewModuleHandler("ble.clear", "",
+		"Clear all devices collected by the BLE discovery module.",
+		func(args []string) error {
+			mod.Session.BLE.Clear()
+			return nil
+		}))
+
 	mod.AddHandler(session.NewModuleHandler("ble.show", "",
 		"Show discovered Bluetooth Low Energy devices.",
 		func(args []string) error {
 			return mod.Show()
 		}))
 
-	mod.AddHandler(session.NewModuleHandler("ble.enum MAC", "ble.enum "+network.BLEMacValidator,
+	enum := session.NewModuleHandler("ble.enum MAC", "ble.enum "+network.BLEMacValidator,
 		"Enumerate services and characteristics for the given BLE device.",
 		func(args []string) error {
 			if mod.isEnumerating() {
@@ -74,9 +81,13 @@ func NewBLERecon(s *session.Session) *BLERecon {
 			mod.writeUUID = nil
 
 			return mod.enumAllTheThings(network.NormalizeMac(args[0]))
-		}))
+		})
 
-	mod.AddHandler(session.NewModuleHandler("ble.write MAC UUID HEX_DATA", "ble.write "+network.BLEMacValidator+" ([a-fA-F0-9]+) ([a-fA-F0-9]+)",
+	enum.Complete("ble.enum", s.BLECompleter)
+
+	mod.AddHandler(enum)
+
+	write := session.NewModuleHandler("ble.write MAC UUID HEX_DATA", "ble.write "+network.BLEMacValidator+" ([a-fA-F0-9]+) ([a-fA-F0-9]+)",
 		"Write the HEX_DATA buffer to the BLE device with the specified MAC address, to the characteristics with the given UUID.",
 		func(args []string) error {
 			mac := network.NormalizeMac(args[0])
@@ -90,7 +101,11 @@ func NewBLERecon(s *session.Session) *BLERecon {
 			}
 
 			return mod.writeBuffer(mac, uuid, data)
-		}))
+		})
+
+	write.Complete("ble.write", s.BLECompleter)
+
+	mod.AddHandler(write)
 
 	return mod
 }

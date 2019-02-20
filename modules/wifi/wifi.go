@@ -28,6 +28,8 @@ type WiFiModule struct {
 
 	handle              *pcap.Handle
 	source              string
+	region              string
+	txPower             int
 	minRSSI             int
 	channel             int
 	hopPeriod           time.Duration
@@ -87,6 +89,13 @@ func NewWiFiModule(s *session.Session) *WiFiModule {
 			return mod.Stop()
 		}))
 
+	mod.AddHandler(session.NewModuleHandler("wifi.clear", "",
+		"Clear all access points collected by the WiFi discovery module.",
+		func(args []string) error {
+			mod.Session.WiFi.Clear()
+			return nil
+		}))
+
 	mod.AddHandler(session.NewModuleHandler("wifi.recon MAC", "wifi.recon ((?:[0-9A-Fa-f]{2}[:-]){5}(?:[0-9A-Fa-f]{2}))",
 		"Set 802.11 base station address to filter for.",
 		func(args []string) error {
@@ -115,7 +124,7 @@ func NewWiFiModule(s *session.Session) *WiFiModule {
 		"-200",
 		"Minimum WiFi signal strength in dBm."))
 
-	mod.AddHandler(session.NewModuleHandler("wifi.deauth BSSID", `wifi\.deauth ((?:[a-fA-F0-9:]{11,})|all|\*)`,
+	deauth := session.NewModuleHandler("wifi.deauth BSSID", `wifi\.deauth ((?:[a-fA-F0-9:]{11,})|all|\*)`,
 		"Start a 802.11 deauth attack, if an access point BSSID is provided, every client will be deauthenticated, otherwise only the selected client. Use 'all', '*' or a broadcast BSSID (ff:ff:ff:ff:ff:ff) to iterate every access point with at least one client and start a deauth attack for each one.",
 		func(args []string) error {
 			if args[0] == "all" || args[0] == "*" {
@@ -126,7 +135,11 @@ func NewWiFiModule(s *session.Session) *WiFiModule {
 				return err
 			}
 			return mod.startDeauth(bssid)
-		}))
+		})
+
+	deauth.Complete("wifi.deauth", s.WiFiCompleterFull)
+
+	mod.AddHandler(deauth)
 
 	mod.AddParam(session.NewStringParameter("wifi.deauth.skip",
 		"",
@@ -141,7 +154,7 @@ func NewWiFiModule(s *session.Session) *WiFiModule {
 		"true",
 		"Send wifi deauth packets to open networks."))
 
-	mod.AddHandler(session.NewModuleHandler("wifi.assoc BSSID", `wifi\.assoc ((?:[a-fA-F0-9:]{11,})|all|\*)`,
+	assoc := session.NewModuleHandler("wifi.assoc BSSID", `wifi\.assoc ((?:[a-fA-F0-9:]{11,})|all|\*)`,
 		"Send an association request to the selected BSSID in order to receive a RSN PMKID key. Use 'all', '*' or a broadcast BSSID (ff:ff:ff:ff:ff:ff) to iterate for every access point.",
 		func(args []string) error {
 			if args[0] == "all" || args[0] == "*" {
@@ -152,7 +165,20 @@ func NewWiFiModule(s *session.Session) *WiFiModule {
 				return err
 			}
 			return mod.startAssoc(bssid)
-		}))
+		})
+
+	assoc.Complete("wifi.assoc", s.WiFiCompleter)
+
+	mod.AddHandler(assoc)
+
+	mod.AddParam(session.NewStringParameter("wifi.region",
+		"BO",
+		"",
+		"Set the WiFi region to this value before activating the interface."))
+
+	mod.AddParam(session.NewIntParameter("wifi.txpower",
+		"30",
+		"Set WiFi transmission power to this value before activating the interface."))
 
 	mod.AddParam(session.NewStringParameter("wifi.assoc.skip",
 		"",
@@ -295,7 +321,13 @@ func (mod *WiFiModule) Configure() error {
 	var hopPeriod int
 	var err error
 
-	if err, mod.source = mod.StringParam("wifi.source.file"); err != nil {
+	if err, mod.region = mod.StringParam("wifi.region"); err != nil {
+		return err
+	} else if err, mod.txPower = mod.IntParam("wifi.txpower"); err != nil {
+		return err
+	} else if err, mod.source = mod.StringParam("wifi.source.file"); err != nil {
+		return err
+	} else if err, mod.minRSSI = mod.IntParam("wifi.rssi.min"); err != nil {
 		return err
 	}
 
@@ -307,17 +339,28 @@ func (mod *WiFiModule) Configure() error {
 		}
 	}
 
-	if err, mod.minRSSI = mod.IntParam("wifi.rssi.min"); err != nil {
-		return err
-	}
-
 	ifName := mod.Session.Interface.Name()
-
 	if mod.source != "" {
 		if mod.handle, err = pcap.OpenOffline(mod.source); err != nil {
 			return fmt.Errorf("error while opening file %s: %s", mod.source, err)
 		}
 	} else {
+		if mod.region != "" {
+			if err := network.SetWiFiRegion(mod.region); err != nil {
+				return err
+			} else {
+				mod.Info("WiFi region set to '%s'", mod.region)
+			}
+		}
+
+		if mod.txPower > 0 {
+			if err := network.SetInterfaceTxPower(ifName, mod.txPower); err != nil {
+				mod.Warning("could not set interface %s txpower to %d, 'Set Tx Power' requests not supported", ifName, mod.txPower)
+			} else {
+				mod.Info("interface %s txpower set to %d", ifName, mod.txPower)
+			}
+		}
+
 		for retry := 0; ; retry++ {
 			ihandle, err := pcap.NewInactiveHandle(ifName)
 			if err != nil {
